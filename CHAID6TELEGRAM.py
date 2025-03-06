@@ -3,8 +3,8 @@ from flask import Flask, request
 import os
 
 # Configuración del bot
-TOKEN = os.environ.get("TOKEN")  # Leer el token desde las variables de entorno
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Leer la URL del webhook desde las variables de entorno
+TOKEN = os.environ.get("TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 # Iniciar servidor Flask
@@ -20,9 +20,11 @@ def set_webhook():
 @app.route("/webhook", methods=["POST"])
 def recibir_actualizacion():
     datos = request.json
+    print("Datos recibidos:", datos)  # Depuración
     if "message" in datos:
         chat_id = datos["message"]["chat"]["id"]
         mensaje = datos["message"].get("text", "")
+        print(f"Mensaje recibido de chat_id {chat_id}: {mensaje}")  # Depuración
         
         # Si el usuario envía /start, responde con su chat_id
         if mensaje.lower() == "/start":
@@ -35,7 +37,8 @@ def recibir_actualizacion():
 def enviar_mensaje(chat_id, mensaje):
     url = f"{TELEGRAM_API_URL}/sendMessage"
     payload = {"chat_id": chat_id, "text": mensaje}
-    requests.post(url, json=payload)
+    response = requests.post(url, json=payload)
+    print("Respuesta de enviar_mensaje:", response.json())  # Depuración
 
 # Ruta de salud para mantener activo el bot en Render
 @app.route("/health")
