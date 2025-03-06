@@ -1,3 +1,5 @@
-flask
-requests
-python-telegram-bot
+Flask==2.3.2
+requests==2.28.1
+selenium==4.9.0
+pyttsx3==2.90
+psutil==5.9.5
