@@ -42,5 +42,6 @@ def health_check():
     return "OK", 200
 
 if __name__ == "__main__":
-    set_webhook()  # Configura el webhook al iniciar
-    app.run(host="0.0.0.0", port=5000)
+    import os
+    PORT = int(os.environ.get("PORT", 10000))  # Render asigna un puerto dinámico
+    app.run(host="0.0.0.0", port=PORT)
