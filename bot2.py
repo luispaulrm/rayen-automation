@@ -83,7 +83,10 @@ def enviar_mensaje(chat_id, mensaje):
         url = f"{TELEGRAM_API_URL}/sendMessage"
         payload = {"chat_id": chat_id, "text": mensaje}
         response = requests.post(url, json=payload, timeout=10)
-        logger.info(f"Mensaje enviado a {chat_id}: {response.json()}")
+        if response.status_code == 200:
+            logger.info(f"Mensaje enviado a {chat_id}: {response.json()}")
+        else:
+            logger.error(f"Fallo al enviar mensaje a {chat_id}: {response.status_code} - {response.text}")
     except Exception as e:
         logger.error(f"Error enviando mensaje a {chat_id}: {e}")
 
@@ -103,6 +106,7 @@ def recibir_actualizacion():
     if request.method == "POST":
         try:
             datos = request.json
+            logger.info(f"Datos recibidos: {datos}")  # Depuración: mostrar datos recibidos
             if "message" in datos:
                 chat_id = str(datos["message"]["chat"]["id"])
                 mensaje = datos["message"].get("text", "").lower()
@@ -112,7 +116,11 @@ def recibir_actualizacion():
                     user_states[chat_id] = {"paused": False, "stopped": False}
 
                 if mensaje == "/start":
-                    enviar_mensaje(chat_id, f"Hola, tu chat ID es: {chat_id}")
+                    logger.info(f"Procesando /start para chat_id: {chat_id}")  # Depuración
+                    try:
+                        enviar_mensaje(chat_id, f"Hola, tu chat ID es: {chat_id}")
+                    except Exception as e:
+                        logger.error(f"Error al enviar mensaje de /start: {e}")
                 elif mensaje == "/pausar" and not user_states[chat_id]["stopped"]:
                     if user_states[chat_id]["paused"]:
                         enviar_mensaje(chat_id, "ℹ️ Las notificaciones ya están pausadas.")
