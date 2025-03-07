@@ -15,11 +15,13 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://rayenbot4.onrender.com/webh
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TOKEN}"
 HEALTH_CHECK_INTERVAL = 120  # 2 minutos en segundos
 RETRY_INTERVAL = 60  # 1 minuto en segundos para reintentos
+NOTIFICATION_INTERVAL = 12 * 60 * 60  # 12 horas en segundos
 
 app = Flask(__name__)
 
 # Diccionario para almacenar el estado de notificaciones por CHAT_ID
 user_states = {}  # {chat_id: {"paused": False, "stopped": False}}
+last_notification_time = None  # Variable global para rastrear la última notificación
 
 # Función para configurar o verificar el webhook
 def set_webhook():
@@ -49,12 +51,17 @@ def keep_alive():
 
 # Función para reintentar tras suspensión
 def retry_on_sleep():
+    global last_notification_time
     while True:
         try:
             response = requests.get(WEBHOOK_URL, timeout=10)
             if response.status_code != 200:
-                logger.warning("Instancia parece estar dormida. Intentando reiniciar...")
-                notify_sleep()
+                current_time = time.time()
+                # Verificar si han pasado 12 horas desde la última notificación
+                if last_notification_time is None or (current_time - last_notification_time >= NOTIFICATION_INTERVAL):
+                    logger.warning("Instancia parece estar dormida. Intentando reiniciar...")
+                    notify_sleep()
+                    last_notification_time = current_time  # Actualizar el tiempo de la última notificación
         except Exception as e:
             logger.error(f"Error en retry_on_sleep: {e}")
         time.sleep(RETRY_INTERVAL)  # Revisar cada minuto
