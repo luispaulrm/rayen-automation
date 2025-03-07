@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("TOKEN", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://rayenbot4.onrender.com/webhook")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TOKEN}"
-HEALTH_CHECK_INTERVAL = 300  # 5 minutos en segundos
+HEALTH_CHECK_INTERVAL = 120  # 2 minutos en segundos
 RETRY_INTERVAL = 60  # 1 minuto en segundos para reintentos
 
 app = Flask(__name__)
@@ -45,7 +45,7 @@ def keep_alive():
             logger.info("Actividad interna registrada")
         except Exception as e:
             logger.error(f"Error en keep_alive: {e}")
-        time.sleep(HEALTH_CHECK_INTERVAL)  # Cada 5 minutos
+        time.sleep(HEALTH_CHECK_INTERVAL)  # Cada 2 minutos
 
 # Función para reintentar tras suspensión
 def retry_on_sleep():
@@ -62,7 +62,7 @@ def retry_on_sleep():
 # Notificar vía Telegram si el servicio se duerme
 def notify_sleep():
     try:
-        chat_id = "TU_CHAT_ID_AQUI"  # Reemplaza con un CHAT_ID donde quieras recibir notificaciones
+        chat_id = "7294987620"  # Reemplaza con un CHAT_ID donde quieras recibir notificaciones
         mensaje = "⚠️ El servicio en Render se ha dormido. Por favor, realiza un deploy manual o espera a que se reactive."
         payload = {"chat_id": chat_id, "text": mensaje}
         requests.post(f"{TELEGRAM_API_URL}/sendMessage", json=payload, timeout=10)
