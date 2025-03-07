@@ -18,6 +18,9 @@ RETRY_INTERVAL = 60  # 1 minuto en segundos para reintentos
 
 app = Flask(__name__)
 
+# Diccionario para almacenar el estado de notificaciones por CHAT_ID
+user_states = {}  # {chat_id: {"paused": False, "stopped": False}}
+
 # Función para configurar o verificar el webhook
 def set_webhook():
     while True:
@@ -38,9 +41,7 @@ def keep_alive():
     while True:
         try:
             logger.info("🔄 Manteniendo instancia activa con solicitud interna...")
-            # Hacer una solicitud al endpoint de salud para simular actividad
             requests.get(f"{WEBHOOK_URL}/health", timeout=10)
-            # Opcional: registrar un log para forzar actividad
             logger.info("Actividad interna registrada")
         except Exception as e:
             logger.error(f"Error en keep_alive: {e}")
@@ -50,11 +51,9 @@ def keep_alive():
 def retry_on_sleep():
     while True:
         try:
-            # Verificar si la instancia está activa enviando una solicitud a sí misma
             response = requests.get(WEBHOOK_URL, timeout=10)
             if response.status_code != 200:
                 logger.warning("Instancia parece estar dormida. Intentando reiniciar...")
-                # Aquí no podemos reiniciar directamente, pero notificamos
                 notify_sleep()
         except Exception as e:
             logger.error(f"Error en retry_on_sleep: {e}")
@@ -70,6 +69,16 @@ def notify_sleep():
         logger.warning(f"Notificación enviada a Telegram: {mensaje}")
     except Exception as e:
         logger.error(f"Error al enviar notificación de sueño: {e}")
+
+# Función para enviar mensajes a Telegram
+def enviar_mensaje(chat_id, mensaje):
+    try:
+        url = f"{TELEGRAM_API_URL}/sendMessage"
+        payload = {"chat_id": chat_id, "text": mensaje}
+        response = requests.post(url, json=payload, timeout=10)
+        logger.info(f"Mensaje enviado a {chat_id}: {response.json()}")
+    except Exception as e:
+        logger.error(f"Error enviando mensaje a {chat_id}: {e}")
 
 # Iniciar los hilos
 Thread(target=set_webhook, daemon=True).start()
@@ -88,13 +97,39 @@ def recibir_actualizacion():
         try:
             datos = request.json
             if "message" in datos:
-                chat_id = datos["message"]["chat"]["id"]
+                chat_id = str(datos["message"]["chat"]["id"])
                 mensaje = datos["message"].get("text", "").lower()
-                
+
+                # Inicializar estado para el usuario si no existe
+                if chat_id not in user_states:
+                    user_states[chat_id] = {"paused": False, "stopped": False}
+
                 if mensaje == "/start":
                     enviar_mensaje(chat_id, f"Hola, tu chat ID es: {chat_id}")
+                elif mensaje == "/pausar" and not user_states[chat_id]["stopped"]:
+                    if user_states[chat_id]["paused"]:
+                        enviar_mensaje(chat_id, "ℹ️ Las notificaciones ya están pausadas.")
+                    else:
+                        user_states[chat_id]["paused"] = True
+                        enviar_mensaje(chat_id, "🔇 Notificaciones pausadas.")
+                elif mensaje == "/reanudar" and not user_states[chat_id]["stopped"]:
+                    if not user_states[chat_id]["paused"]:
+                        enviar_mensaje(chat_id, "ℹ️ Las notificaciones ya están activas.")
+                    else:
+                        user_states[chat_id]["paused"] = False
+                        enviar_mensaje(chat_id, "🔔 Notificaciones reanudadas.")
+                elif mensaje == "/estado" and not user_states[chat_id]["stopped"]:
+                    estado = "🔇 Pausadas" if user_states[chat_id]["paused"] else "🔔 Activas"
+                    enviar_mensaje(chat_id, f"ℹ️ Estado: {estado}")
+                elif mensaje == "/detener":
+                    if user_states[chat_id]["stopped"]:
+                        enviar_mensaje(chat_id, "ℹ️ El bot ya está detenido.")
+                    else:
+                        user_states[chat_id]["stopped"] = True
+                        user_states[chat_id]["paused"] = False
+                        enviar_mensaje(chat_id, "⛔ Bot detenido.")
                 else:
-                    enviar_mensaje(chat_id, "No entiendo el mensaje. Usa /start para obtener tu ID.")
+                    enviar_mensaje(chat_id, "ℹ️ Comandos disponibles: /start, /pausar, /reanudar, /estado, /detener")
             return "OK", 200
         except Exception as e:
             logger.error(f"Error procesando mensaje: {e}")
@@ -102,15 +137,6 @@ def recibir_actualizacion():
     elif request.method == "GET":
         logger.info("Ping recibido en /webhook")
         return "Bot is alive!", 200
-
-def enviar_mensaje(chat_id, mensaje):
-    try:
-        url = f"{TELEGRAM_API_URL}/sendMessage"
-        payload = {"chat_id": chat_id, "text": mensaje}
-        response = requests.post(url, json=payload, timeout=10)
-        logger.info(f"Mensaje enviado: {response.json()}")
-    except Exception as e:
-        logger.error(f"Error enviando mensaje: {e}")
 
 @app.route("/health", methods=["GET"])
 def health_check():
