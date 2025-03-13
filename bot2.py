@@ -36,21 +36,34 @@ def set_webhook():
                 logger.warning(f"Error configurando webhook: {result}")
         except Exception as e:
             logger.error(f"Error al configurar webhook: {e}")
-        time.sleep(3600)  # Reintentar cada hora
+        # Reintenta cada hora configurar el webhook (puedes ajustarlo a tu gusto)
+        time.sleep(3600)
 
 # Función para mantener la instancia activa
 def keep_alive():
+    """
+    Llama cada 2 minutos a la ruta '/health' para intentar
+    que Render no ponga la app en reposo.
+    """
     while True:
         try:
             logger.info("🔄 Manteniendo instancia activa con solicitud interna...")
-            requests.get(f"{WEBHOOK_URL}/health", timeout=10)
+            # OJO: se llama directamente a /health en vez de /webhook/health
+            # para evitar el 404
+            health_url = "https://rayenbot4.onrender.com/health"
+            requests.get(health_url, timeout=10)
             logger.info("Actividad interna registrada")
         except Exception as e:
             logger.error(f"Error en keep_alive: {e}")
-        time.sleep(HEALTH_CHECK_INTERVAL)  # Cada 2 minutos
+        time.sleep(HEALTH_CHECK_INTERVAL)
 
 # Función para reintentar tras suspensión
 def retry_on_sleep():
+    """
+    Llama a la URL base (WEBHOOK_URL) cada minuto para verificar
+    si la app responde con 200. Si no, envía una notificación de
+    que la instancia puede haberse dormido.
+    """
     global last_notification_time
     while True:
         try:
@@ -64,7 +77,7 @@ def retry_on_sleep():
                     last_notification_time = current_time  # Actualizar el tiempo de la última notificación
         except Exception as e:
             logger.error(f"Error en retry_on_sleep: {e}")
-        time.sleep(RETRY_INTERVAL)  # Revisar cada minuto
+        time.sleep(RETRY_INTERVAL)
 
 # Notificar vía Telegram si el servicio se duerme
 def notify_sleep():
