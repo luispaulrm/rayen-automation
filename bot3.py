@@ -5,7 +5,6 @@ from flask import Flask, request
 from threading import Thread
 import logging
 
-# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -19,23 +18,25 @@ NOTIFICATION_INTERVAL = 12 * 60 * 60
 
 app = Flask(__name__)
 
-# Estados
+# Estados básicos
 user_states = {}  # {chat_id: {"paused": False, "stopped": False}}
 last_notification_time = None
 
-# Estado de control remoto
-control_state = "reanudar"
+# Control remoto
+control_state = "reanudar"  # "pausado", "reanudar" o "detener"
 
+
+# =========== 1) Funciones para mantener webhook e instancias ============
 def set_webhook():
     while True:
         try:
             url = f"{TELEGRAM_API_URL}/setWebhook?url={WEBHOOK_URL}"
-            r = requests.get(url, timeout=10)
-            result = r.json()
-            if result.get("ok"):
-                logger.info(f"Webhook configurado correctamente: {result}")
+            resp = requests.get(url, timeout=10)
+            data = resp.json()
+            if data.get("ok"):
+                logger.info(f"Webhook configurado correctamente: {data}")
             else:
-                logger.warning(f"Error configurando webhook: {result}")
+                logger.warning(f"Error configurando webhook: {data}")
         except Exception as e:
             logger.error(f"Error al configurar webhook: {e}")
         time.sleep(3600)
@@ -57,25 +58,27 @@ def retry_on_sleep():
         try:
             resp = requests.get(WEBHOOK_URL, timeout=10)
             if resp.status_code != 200:
-                current_time = time.time()
-                if last_notification_time is None or (current_time - last_notification_time >= NOTIFICATION_INTERVAL):
+                now = time.time()
+                if last_notification_time is None or (now - last_notification_time >= NOTIFICATION_INTERVAL):
                     logger.warning("Instancia parece estar dormida. Intentando reiniciar...")
                     notify_sleep()
-                    last_notification_time = current_time
+                    last_notification_time = now
         except Exception as e:
             logger.error(f"Error en retry_on_sleep: {e}")
         time.sleep(RETRY_INTERVAL)
 
 def notify_sleep():
     try:
-        chat_id = "7294987620"  # Ajusta con tu chat ID de alerta
-        mensaje = "⚠️ El servicio en Render se ha dormido. Por favor, realiza un deploy manual."
-        payload = {"chat_id": chat_id, "text": mensaje}
-        requests.post(f"{TELEGRAM_API_URL}/sendMessage", json=payload, timeout=10)
-        logger.warning(f"Notificación enviada a Telegram: {mensaje}")
+        chat_id_alert = "7294987620"  # Ajusta con el chat ID donde quieras la alerta
+        msg = "⚠️ El servicio en Render se ha dormido. Haz un deploy manual o espera la reactivación."
+        requests.post(f"{TELEGRAM_API_URL}/sendMessage",
+                      json={"chat_id": chat_id_alert, "text": msg}, timeout=10)
+        logger.warning(f"Notificación de sueño enviada: {msg}")
     except Exception as e:
         logger.error(f"Error al enviar notificación de sueño: {e}")
 
+
+# =========== 2) Funciones para enviar mensajes ============
 def enviar_mensaje(chat_id, texto):
     try:
         url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -88,19 +91,15 @@ def enviar_mensaje(chat_id, texto):
     except Exception as e:
         logger.error(f"Error enviando mensaje a {chat_id}: {e}")
 
-# NUEVO: función para enviar el botón "Ver Comandos"
 def enviar_boton_menu(chat_id):
     """
-    Envía un botón Inline Keyboard (texto: "Ver comandos").
-    Al hacer clic, el bot recibirá un callback_query con data="ver_comandos".
+    Envía un único botón: "Ver comandos".
+    Al hacer clic, genera callback_data="ver_comandos".
     """
     keyboard = {
         "inline_keyboard": [
             [
-                {
-                    "text": "Ver comandos",
-                    "callback_data": "ver_comandos"
-                }
+                {"text": "Ver comandos", "callback_data": "ver_comandos"}
             ]
         ]
     }
@@ -112,7 +111,8 @@ def enviar_boton_menu(chat_id):
     url = f"{TELEGRAM_API_URL}/sendMessage"
     requests.post(url, json=payload, timeout=10)
 
-# Rutas para control remoto
+
+# =========== 3) Endpoints de control remoto ============
 @app.route("/control", methods=["GET"])
 def get_control():
     return {"estado": control_state}, 200
@@ -133,6 +133,8 @@ def set_control():
         logger.error(f"Error actualizando control: {e}")
         return {"ok": False, "error": str(e)}, 500
 
+
+# =========== 4) Rutas Flask estándar ============
 @app.route("/", methods=["GET", "HEAD"])
 def index():
     logger.info("Ping recibido en /")
@@ -146,34 +148,38 @@ def recibir_webhook():
             datos = request.json
             logger.info(f"Datos recibidos: {datos}")
 
-            # 1) Manejo de callback_query (cuando el usuario hace clic en un botón)
+            # 1) Manejo de callback_query (click en botones)
             if "callback_query" in datos:
                 cb = datos["callback_query"]
                 cb_chat_id = cb["message"]["chat"]["id"]
                 cb_data = cb.get("data", "")
 
-                # Responder a la callback, para eliminar el “relojito” en la interfaz
+                # Responder la callback query (para quitar el "relojito" en Telegram)
                 answer_url = f"{TELEGRAM_API_URL}/answerCallbackQuery"
                 requests.post(answer_url, json={"callback_query_id": cb["id"]}, timeout=10)
 
                 if cb_data == "ver_comandos":
-                    # Devuelve la lista de comandos en un mensaje
+                    # Muestra la lista de comandos
                     enviar_mensaje(cb_chat_id, "ℹ️ Comandos disponibles: /start, /pausar, /reanudar, /estado, /detener")
+
                 return "OK", 200
 
-            # 2) Manejo de message normal
+            # 2) Manejo de message normal (texto)
             if "message" in datos:
                 chat_id = str(datos["message"]["chat"]["id"])
                 mensaje = datos["message"].get("text", "").lower()
 
-                # Asegúrate de que el usuario tenga un estado en user_states
                 if chat_id not in user_states:
                     user_states[chat_id] = {"paused": False, "stopped": False}
 
+                # ===========  A) COMANDO START  ===========
                 if mensaje == "/start":
-                    # En vez de mandar "Hola tu chat ID...", ahora enviamos el botón "Ver comandos"
+                    # Muestra Chat ID en un mensaje:
+                    enviar_mensaje(chat_id, f"Hola, tu chat ID es: {chat_id}")
+                    # Luego envía el botón para ver los comandos
                     enviar_boton_menu(chat_id)
 
+                # ===========  B) COMANDO PAUSAR  ===========
                 elif mensaje == "/pausar" and not user_states[chat_id]["stopped"]:
                     if user_states[chat_id]["paused"]:
                         enviar_mensaje(chat_id, "ℹ️ Las notificaciones ya están pausadas.")
@@ -181,6 +187,7 @@ def recibir_webhook():
                         user_states[chat_id]["paused"] = True
                         enviar_mensaje(chat_id, "🔇 Notificaciones pausadas.")
 
+                # ===========  C) COMANDO REANUDAR  ===========
                 elif mensaje == "/reanudar" and not user_states[chat_id]["stopped"]:
                     if not user_states[chat_id]["paused"]:
                         enviar_mensaje(chat_id, "ℹ️ Las notificaciones ya están activas.")
@@ -188,10 +195,12 @@ def recibir_webhook():
                         user_states[chat_id]["paused"] = False
                         enviar_mensaje(chat_id, "🔔 Notificaciones reanudadas.")
 
+                # ===========  D) COMANDO ESTADO  ===========
                 elif mensaje == "/estado" and not user_states[chat_id]["stopped"]:
                     estado = "🔇 Pausadas" if user_states[chat_id]["paused"] else "🔔 Activas"
                     enviar_mensaje(chat_id, f"ℹ️ Estado: {estado}")
 
+                # ===========  E) COMANDO DETENER  ===========
                 elif mensaje == "/detener":
                     if user_states[chat_id]["stopped"]:
                         enviar_mensaje(chat_id, "ℹ️ El bot ya está detenido.")
@@ -200,8 +209,8 @@ def recibir_webhook():
                         user_states[chat_id]["paused"] = False
                         enviar_mensaje(chat_id, "⛔ Bot detenido.")
 
+                # ===========  F) OTROS MENSAJES  ===========
                 else:
-                    # Texto cuando no coincide con ninguno
                     enviar_mensaje(chat_id, "ℹ️ Comandos disponibles: /start, /pausar, /reanudar, /estado, /detener")
 
             return "OK", 200
@@ -219,12 +228,15 @@ def health_check():
     logger.info("Chequeo de salud recibido")
     return "OK", 200
 
+# Iniciar hilos
 Thread(target=set_webhook, daemon=True).start()
 Thread(target=keep_alive, daemon=True).start()
 Thread(target=retry_on_sleep, daemon=True).start()
 
+# Bloque principal
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
