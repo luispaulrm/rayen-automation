@@ -1,7 +1,7 @@
 import os
 import requests
 import time
-from flask import Flask, request
+from flask import Flask, request, send_file
 from threading import Thread
 import logging
 
@@ -24,7 +24,6 @@ last_notification_time = None
 
 # Control remoto
 control_state = "reanudar"  # "pausado", "reanudar" o "detener"
-
 
 # =========== 1) Funciones para mantener webhook e instancias ============
 def set_webhook():
@@ -77,7 +76,6 @@ def notify_sleep():
     except Exception as e:
         logger.error(f"Error al enviar notificación de sueño: {e}")
 
-
 # =========== 2) Funciones para enviar mensajes ============
 def enviar_mensaje(chat_id, texto):
     try:
@@ -111,7 +109,6 @@ def enviar_boton_menu(chat_id):
     url = f"{TELEGRAM_API_URL}/sendMessage"
     requests.post(url, json=payload, timeout=10)
 
-
 # =========== 3) Endpoints de control remoto ============
 @app.route("/control", methods=["GET"])
 def get_control():
@@ -132,7 +129,6 @@ def set_control():
     except Exception as e:
         logger.error(f"Error actualizando control: {e}")
         return {"ok": False, "error": str(e)}, 500
-
 
 # =========== 4) Rutas Flask estándar ============
 @app.route("/", methods=["GET", "HEAD"])
@@ -228,6 +224,36 @@ def health_check():
     logger.info("Chequeo de salud recibido")
     return "OK", 200
 
+# =========== 5) Rutas para subir y servir archivos de audio ============
+@app.route("/audio/upload", methods=["POST"])
+def subir_audio():
+    if 'file' not in request.files:
+        return {"ok": False, "error": "No se recibió archivo"}, 400
+
+    archivo = request.files['file']
+    nombre = archivo.filename
+
+    if not nombre.endswith(".mp3"):
+        return {"ok": False, "error": "Solo se permiten archivos .mp3"}, 400
+
+    ruta = os.path.join("/tmp", nombre)
+    try:
+        archivo.save(ruta)
+        logger.info(f"🎵 Archivo guardado en: {ruta}")
+        url_publica = f"https://notirayen2.onrender.com/audio/{nombre}"
+        return {"ok": True, "url": url_publica}, 200
+    except Exception as e:
+        logger.error(f"❌ Error al guardar audio: {e}")
+        return {"ok": False, "error": str(e)}, 500
+
+@app.route("/audio/<nombre>", methods=["GET"])
+def servir_audio(nombre):
+    ruta = os.path.join("/tmp", nombre)
+    if os.path.exists(ruta):
+        return send_file(ruta, mimetype='audio/mpeg')
+    else:
+        return "Archivo no encontrado", 404
+
 # Iniciar hilos
 Thread(target=set_webhook, daemon=True).start()
 Thread(target=keep_alive, daemon=True).start()
@@ -237,6 +263,7 @@ Thread(target=retry_on_sleep, daemon=True).start()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
